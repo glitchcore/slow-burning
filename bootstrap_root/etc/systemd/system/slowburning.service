@@ -1,0 +1,15 @@
+[Unit]
+Description=Slow Burning open CV
+After=network.target
+
+[Service]
+Environment=DISPLAY=:0
+ExecStart=/bin/bash cv_test.sh
+WorkingDirectory=/home/pi
+Restart=always
+RestartSec=2
+User=pi
+
+[Install]
+WantedBy=multi-user.target
+
