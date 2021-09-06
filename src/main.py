@@ -4,6 +4,14 @@ import cv2
 import signal
 import sys
 
+from pyfirmata import Arduino, util
+from time import sleep
+
+board = Arduino("/dev/ttyAMA0")
+lfo = board.get_pin("d:9:p")
+pitch = board.get_pin("d:5:p")
+cutoff = board.get_pin("d:6:p")
+
 THRESHOLD_CORRECTION = 0.85
 
 HEIGHT = 576
@@ -124,7 +132,16 @@ def camera_thread(cap):
     MAX_FRAME_SKIPPED = 100
     frame_counter = 0
 
+    led_state = 0
+
     while(True):
+        if led_state == 1:
+            led_state = 0
+        else:
+            led_state = 1
+
+        board.digital[13].write(led_state)
+        
         # Capture frame-by-frame
         ret, frame = cap.read()
         frame_counter += 1
