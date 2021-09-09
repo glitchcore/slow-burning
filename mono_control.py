@@ -1,4 +1,4 @@
-from math import ln
+from math import log
 def read_temp(pin):
   R0 = 5.1e3
   B = 3435
