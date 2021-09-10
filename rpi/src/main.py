@@ -3,23 +3,86 @@ import cv2
 
 import signal
 import sys
+from math import log
 
 from pyfirmata import Arduino, util
 from time import sleep
+import time
 
 board = Arduino("/dev/ttyAMA0")
+
+it = util.Iterator(board)  
+it.start()
+
 lfo = board.get_pin("d:9:p")
 pitch = board.get_pin("d:5:p")
 cutoff = board.get_pin("d:6:p")
 
-THRESHOLD_CORRECTION = 0.85
+temperature_pin = board.get_pin("a:0:i")
+humidity_pin = board.get_pin("a:1:i")
+
+THRESHOLD_CORRECTION = 0.6
 
 HEIGHT = 600
 WIDTH = 1024
 
-def process_image(src, debug=True, update_contour=True):
-    src_blur = cv2.blur(src, (5,5))
 
+temp_avg = None
+N = 0.1
+
+def read_temp(pin):
+    global temp_avg
+    R0 = 5.1e3
+    B = 3435
+    R25 = 10e3
+    T_BASE = 25
+    r2 = R0 * (1/pin.read() - 1.)
+    k = log(r2 / R25) / B + 1.0 / (273.15 + T_BASE)
+
+    if temp_avg == None:
+        temp_avg = 1.0 / k - 273.15
+    else:
+        temp_avg = temp_avg * (1. - N) + (1.0 / k - 273.15) * N
+    return temp_avg
+
+TARGET_TEMP = 60
+TARGET_HUMIDITY = 70
+
+def read_humidity(pin):
+    return pin.read()
+
+def add_info(frame, info):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    cv2.putText(
+        frame, "temperature: %.01f C" % info["temperature"],
+        (80,60),
+        font, 2., (0,0,0), 4, cv2.LINE_AA
+    )
+
+    cv2.putText(
+        frame, "humidity: %.01f%%" % info["humidity"],
+        (80,120),
+        font, 2., (0,0,0), 4, cv2.LINE_AA
+    )
+
+    return frame
+
+profile_t = time.time()
+def profile(message):
+    global profile_t
+    print("profile", message, time.time() - profile_t)
+    profile_t = time.time()
+
+erosion_size = 10
+erosion_element = cv2.getStructuringElement(
+    cv2.MORPH_ELLIPSE,
+    (2 * erosion_size + 1, 2 * erosion_size + 1),
+    (erosion_size, erosion_size)
+)
+
+def calculate_mask(src):
+    src_blur = cv2.blur(src, (5,5))
     src_hsv = cv2.cvtColor(src_blur, cv2.COLOR_BGR2HSV)
     src_h, src_s, src_v = cv2.split(src_hsv)
 
@@ -40,8 +103,8 @@ def process_image(src, debug=True, update_contour=True):
     contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if len(contours) == 0:
-        return src
-    
+        return None, None
+
     max_contour = max(contours, key=lambda x: cv2.contourArea(x))
 
     dimensions = src.shape
@@ -51,62 +114,60 @@ def process_image(src, debug=True, update_contour=True):
         [max_contour], -1, (255, 255, 255), -1
     )
 
+    # ooi_mask = cv2.dilate(ooi_mask, erosion_element)
     bg_mask = cv2.bitwise_not(ooi_mask)
 
+    return {"ooi": ooi_mask, "bg": bg_mask}, max_contour
+
+def calculate_info(src, mask):
+    if mask is not None:
+        bg_mean = cv2.mean(src, cv2.cvtColor(mask["bg"], cv2.COLOR_BGR2GRAY))
+        object_mean = cv2.mean(src, cv2.cvtColor(mask["ooi"], cv2.COLOR_BGR2GRAY))
+
+        color = (
+            object_mean[2]/bg_mean[2] if bg_mean[2] > 0 else 0,
+            object_mean[1]/bg_mean[1] if bg_mean[1] > 0 else 0,
+            object_mean[0]/bg_mean[0] if bg_mean[0] > 0 else 0
+        )
+
+        print("red: %.02f, green: %.02f, blue: %.02f" % color, flush=True)
+
+        return color
+    else:
+        return None
+
+
+def process_image(src, mask, contour):
+    profile("start process")
+
+    if mask == None:
+        return src
+
     # object
-    ooi = cv2.subtract(ooi_mask, src)
-    ooi = cv2.subtract(ooi_mask, ooi)
-    object_mean = cv2.mean(src, cv2.cvtColor(ooi_mask, cv2.COLOR_BGR2GRAY))
+    '''
+    ooi = cv2.subtract(mask["ooi"], src)
+    ooi = cv2.subtract(mask["ooi"], ooi)
 
     # background
-    bg = cv2.subtract(bg_mask, src)
-    bg = cv2.subtract(bg_mask, bg)
-    bg_mean = cv2.mean(src, cv2.cvtColor(bg_mask, cv2.COLOR_BGR2GRAY))
-
-    color = (
-        object_mean[2]/bg_mean[2] if bg_mean[2] > 0 else 0,
-        object_mean[1]/bg_mean[1] if bg_mean[1] > 0 else 0,
-        object_mean[0]/bg_mean[0] if bg_mean[0] > 0 else 0
-    )
+    bg = cv2.subtract(mask["bg"], src)
+    bg = cv2.subtract(mask["bg"], bg)
+    bg_blur = cv2.blur(bg, (5,5))
 
     out_img = cv2.addWeighted(
-        ooi, 1.5,
-        src_blur, 0.7,
+        ooi, 1.0,
+        bg_blur, 0.7,
         0
     )
+    '''
+    out_img = src
 
-    out_img = cv2.drawContours(
-        out_img,
-        [max_contour], -1, (20, 50, 50), 1
-    )
+    # profile("addWeighted")
 
-    out_img = cv2.resize(out_img, (WIDTH, HEIGHT))
-
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    cv2.putText(
-        out_img, "red: %.02f" % color[0],
-        (28,20),
-        font, .5, (20,20,230), 1, cv2.LINE_AA
-    )
-    cv2.putText(
-        out_img, "green: %.02f" % color[1],
-        (10,40),
-        font, .5, (100,250,100), 1, cv2.LINE_AA
-    )
-    cv2.putText(
-        out_img, "blue: %.02f" % color[2],
-        (22,60),
-        font, .5, (230,20,20), 1, cv2.LINE_AA
-    )
-
-    if(debug):
-        print("red: %.02f, green: %.02f, blue: %.02f" % color, flush=True)
-        # print(th_min, th_max, threshold)
-        # print("object:", object_mean)
-        # print("bg:", bg_mean)
-        # cv2.imshow("object", ooi)
-        # cv2.imshow("background", bg)
-        # cv2.imshow("thresh", thresh)
+    if contour is not None:
+        out_img = cv2.drawContours(
+            out_img,
+            [contour], -1, (20, 50, 50), 1
+        )
 
     return out_img
 
@@ -134,14 +195,10 @@ def camera_thread(cap):
 
     led_state = 0
 
-    while(True):
-        if led_state == 1:
-            led_state = 0
-        else:
-            led_state = 1
+    mask = None
+    contour = None
 
-        board.digital[13].write(led_state)
-        
+    while(True):
         # Capture frame-by-frame
         ret, frame = cap.read()
         frame_counter += 1
@@ -161,8 +218,40 @@ def camera_thread(cap):
         # if frame_counter % 4 == 0:
         # out_img = process_image(frame, frame_counter % 2 == 0)
         #else:
-        # out_img = cv2.resize(frame, (WIDTH, HEIGHT))
-        out_img = frame
+
+        info = {}
+
+        
+        info["humidity"] = read_humidity(humidity_pin)
+        info["temperature"] = read_temp(temperature_pin)
+
+        temp_diff = abs(info["temperature"] - TARGET_TEMP)
+        print("temp diff", temp_diff)
+
+        hum_diff = abs(info["humidity"] - TARGET_HUMIDITY)
+        print("hum diff", hum_diff)
+
+
+        if led_state == 1:
+            led_state = 0
+        else:
+            led_state = 1
+
+        board.digital[13].write(led_state)
+
+        out_img = frame[85:-40, 108:-108]
+
+        if frame_counter % 8 == 0:
+            mask, contour = calculate_mask(out_img)
+            calculate_info(out_img, mask)
+
+        out_img = process_image(out_img, mask, contour)
+
+        out_img = cv2.resize(out_img, (WIDTH, HEIGHT), cv2.INTER_NEAREST)
+
+        # profile("resizing")
+
+        out_img = add_info(out_img, info)
 
         # Display the resulting frame
         cv2.imshow('frame', out_img)
