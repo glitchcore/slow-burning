@@ -5,7 +5,7 @@ int led = 13;
 
 float read_temp(int pin) {
   const float R0 = 5.1e3;
-  const float B = 3950;
+  const float B = 3435;
   const float R25 = 10e3;
   const float T_BASE = 25;
   float r2 = R0 * (1./((float)analogRead(pin)/1023.) - 1.);
@@ -33,7 +33,8 @@ void loop() {
   analogWrite(ext_led, (1024 - analogRead(A2))/4);
 
   temp = temp * (1. - N) + read_temp(A5) * N;
-  target_temp = target_temp * (1. - N) + ((float)analogRead(A3) * 80/1024.) * N;
+  // target_temp = target_temp * (1. - N) + ((float)analogRead(A3) * 80/1024.) * N;
+  target_temp = 60;
 
   if(heating) {
     if(temp > target_temp + 0.1) {
@@ -51,7 +52,7 @@ void loop() {
   // Serial.print(1024 - analogRead(A2)); Serial.print(" ");
   // Serial.print(1024 - analogRead(A3)); Serial.print(" ");
   Serial.print(temp); Serial.print(" ");
-  Serial.print(target_temp); Serial.print(" ");
+  // Serial.print(target_temp); Serial.print(" ");
   Serial.println();
 
   delay(100);
