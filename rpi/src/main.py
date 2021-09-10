@@ -14,8 +14,8 @@ cutoff = board.get_pin("d:6:p")
 
 THRESHOLD_CORRECTION = 0.85
 
-HEIGHT = 576
-WIDTH = 720
+HEIGHT = 600
+WIDTH = 1024
 
 def process_image(src, debug=True, update_contour=True):
     src_blur = cv2.blur(src, (5,5))
@@ -159,9 +159,10 @@ def camera_thread(cap):
 
         # Our operations on the frame come here
         # if frame_counter % 4 == 0:
-        out_img = process_image(frame, frame_counter % 2 == 0)
+        # out_img = process_image(frame, frame_counter % 2 == 0)
         #else:
-        #    out_img = cv2.resize(frame, (WIDTH, HEIGHT))
+        # out_img = cv2.resize(frame, (WIDTH, HEIGHT))
+        out_img = frame
 
         # Display the resulting frame
         cv2.imshow('frame', out_img)
@@ -180,6 +181,9 @@ if len(sys.argv) > 1:
     load_image(sys.argv[1])
 else:
     cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
+
     camera_thread(cap)
 
 do_exit()
