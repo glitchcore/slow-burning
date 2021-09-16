@@ -5,9 +5,13 @@ import signal
 import sys
 from math import log
 
+import random
+
 from pyfirmata import Arduino, util
 from time import sleep
 import time
+
+from netifaces import ifaddresses
 
 board = Arduino("/dev/ttyAMA0")
 
@@ -25,6 +29,16 @@ THRESHOLD_CORRECTION = 0.6
 
 HEIGHT = 600
 WIDTH = 1024
+
+def get_my_ip():
+    try:
+        wlan0 = ifaddresses('wlan0')
+        if 2 in wlan0:
+            return wlan0[2][0]['addr']
+        else:
+            return None
+    except ValueError:
+        return None
 
 
 temp_avg = None
@@ -49,10 +63,20 @@ TARGET_TEMP = 60
 TARGET_HUMIDITY = 70
 
 def read_humidity(pin):
-    return pin.read()
+    raw = pin.read() * 5.0
+    humidity = ((raw - 0.6) / (2.7 - 0.6)) * (90 - 20) + 20
+    return humidity
 
 def add_info(frame, info):
     font = cv2.FONT_HERSHEY_SIMPLEX
+
+    my_ip = get_my_ip()
+    if my_ip is not None:
+        cv2.putText(
+            frame, "ip: %s" % my_ip,
+            (10,15),
+            font, .5, (0,0,0), 1, cv2.LINE_AA
+        )
 
     cv2.putText(
         frame, "temperature: %.01f C" % info["temperature"],
@@ -198,6 +222,10 @@ def camera_thread(cap):
     mask = None
     contour = None
 
+    cutoff_counter = 0
+    lfo_counter = 0
+    pitch_counter = 0
+
     while(True):
         # Capture frame-by-frame
         ret, frame = cap.read()
@@ -226,11 +254,32 @@ def camera_thread(cap):
         info["temperature"] = read_temp(temperature_pin)
 
         temp_diff = abs(info["temperature"] - TARGET_TEMP)
-        print("temp diff", temp_diff)
+        print("temp:", info["temperature"], "temp diff:", temp_diff)
 
         hum_diff = abs(info["humidity"] - TARGET_HUMIDITY)
-        print("hum diff", hum_diff)
+        print("hum:", info["humidity"], "hum diff:", hum_diff)
 
+        cutoff_counter += 1
+        pitch_counter += 1
+        lfo_counter += 1
+
+        if cutoff_counter == 1:
+            cutoff_counter = 0
+            value = random.random()
+            print("write cutoff", value)
+            cutoff.write(value)
+
+        if pitch_counter == 3:
+            pitch_counter = 0
+            value = random.random()
+            print("write pitch", value)
+            pitch.write(value)
+
+        if lfo_counter == 5:
+            lfo_counter = 0
+            value = random.random()
+            print("write lfo", value)
+            lfo.write(value)
 
         if led_state == 1:
             led_state = 0

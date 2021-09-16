@@ -7,6 +7,6 @@ echo "running cv script by default"
 
 trap 'echo "kill python by default" && killall python' SIGINT SIGTERM SIGHUP SIGQUIT
 
-workon cv
+workon cv0
 python main.py
 
